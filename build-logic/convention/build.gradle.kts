@@ -52,9 +52,5 @@ gradlePlugin {
             id = "monitor.quality"
             implementationClass = "QualityConventionPlugin"
         }
-        register("androidBenchmark") {
-            id = "monitor.android.benchmark"
-            implementationClass = "AndroidBenchmarkConventionPlugin"
-        }
     }
 }
