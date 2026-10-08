@@ -1,0 +1,8 @@
+# Android SDK path (set by Android Studio or `sdkmanager`).
+sdk.dir=/path/to/Android/sdk
+
+# SciChart trial license key.
+# Request a trial at https://www.scichart.com/
+# The key is read in build-logic → BuildConfig.SCICHART_LICENSE → SciChartSurface.setRuntimeLicenseKey(...)
+# at Application startup. Never commit the real key — it belongs in local.properties only.
+scichart.license=

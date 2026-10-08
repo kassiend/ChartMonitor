@@ -1,0 +1,32 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Claude Code — share agents/skills/MCP, hide personal settings & transcripts
+.claude/settings.local.json
+.claude/transcripts/
+.claude/.cache/
+
+# Project exclude paths
+/benchmark/build/
+/build-logic/convention/build/
+/build-logic/convention/build/classes/kotlin/main/
+/core/chart/build/
+/core/common/build/
+/core/common/build/classes/kotlin/main/
+/core/testing/build/
+/core/ui/build/
+/feature/chartmonitor/build/
+/feature/chartmonitor/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/
