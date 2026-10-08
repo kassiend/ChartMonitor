@@ -123,33 +123,16 @@ internal fun SourceState.remainingMs(nowMs: Long): Long = when (val s = status) 
 }
 
 internal fun formatRemaining(remainingMs: Long): String {
-    val totalSec = remainingMs.coerceAtLeast(0) / MS_IN_SEC
-    val minutes = totalSec / SEC_IN_MIN
-    val seconds = totalSec % SEC_IN_MIN
-    return buildString(TIMER_LEN) {
-        if (minutes < TWO_DIGIT_THRESHOLD) append('0')
-        append(minutes)
-        append(':')
-        if (seconds < TWO_DIGIT_THRESHOLD) append('0')
-        append(seconds)
-    }
+    val sec = remainingMs.coerceAtLeast(0) / 1_000
+    return "%02d:%02d".format(sec / 60, sec % 60)
 }
 
 internal fun formatValue(value: Double): String = String.format(Locale.US, "%+.2f", value)
 
-internal fun secondTicker(
-    clock: MonotonicClock,
-    periodMs: Long = TICK_PERIOD_MS,
-): Flow<Long> = flow {
+internal fun secondTicker(clock: MonotonicClock, periodMs: Long = 1_000L): Flow<Long> = flow {
     while (true) {
         val now = clock.nowMs()
         emit(now)
         delay(periodMs - now % periodMs)
     }
 }
-
-private const val MS_IN_SEC = 1_000L
-private const val SEC_IN_MIN = 60L
-private const val TIMER_LEN = 5
-private const val TWO_DIGIT_THRESHOLD = 10L
-private const val TICK_PERIOD_MS = 1_000L

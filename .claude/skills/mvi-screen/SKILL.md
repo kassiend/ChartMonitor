@@ -1,15 +1,11 @@
 ---
 name: mvi-screen
-description: Use for any change in a presentation layer (feature:*) — new/modified ViewModel, screen Composable, State/Intent/Effect contract, reducer, or user action handling. Enforces the project's MVI rules from plan §3 and §4 ("Monitor screen MVI").
+description: Use for any change in a presentation layer (feature:*) — new/modified ViewModel, screen Composable, State/UIEvent/Effect contract, or user action handling. Enforces the project's MVI pattern built on top of core:ui mvi (BaseViewModel / BaseEffectViewModel).
 ---
 
 # MVI screen
 
-**Source of truth:** `docs/plan.md` §3 (M6, M7, M8, N1, N5, N6), §4 ("Monitor screen MVI").
-
-**Trigger:** any change under `feature:*/presentation/` — ViewModel, screen, reducer, Intent, State.
-
-**Rules:** M6, M7, M8, N1, N5, N6.
+**Trigger:** any change under `feature:*/ui/` — ViewModel, screen, UIEvent, State.
 
 ## Contract
 
@@ -17,13 +13,13 @@ description: Use for any change in a presentation layer (feature:*) — new/modi
 @Immutable
 data class XState(
     val items: ImmutableList<ItemUi> = persistentListOf(),
-    val visibleIds: ImmutableSet<SourceId> = persistentSetOf(),
+    val visibleIds: ImmutableSet<String> = persistentSetOf(),
     val isLoading: Boolean = false,
-    // NO chart points (N1) — those get their own SharedFlow
+    // NO chart points in State — those get their own SharedFlow
 ) : BaseUIState
 
 sealed interface XUIEvent : BaseUIEvent {
-    data class ToggleVisibility(val id: SourceId) : XUIEvent
+    data class ToggleVisibility(val id: String) : XUIEvent
     data object Refresh : XUIEvent
 }
 
@@ -35,40 +31,33 @@ sealed interface XEffect : BaseUIEffect {
 
 ## Reducer-style handling
 
-Reducing is **inside the ViewModel** via `reduce(event)` overloads (see `core:mvi` `BaseViewModel`). The ViewModel owns a single `MutableStateFlow<State>` and updates it with `updateUIState { it.copy(...) }`.
+Reducing lives **inside the ViewModel** via `reduce(event)` overloads (see `core:ui` `BaseViewModel`). The ViewModel owns a single `MutableStateFlow<State>` and updates it with `updateUIState { it.copy(...) }`.
 
-Formatting, sorting, and derived values go into private helpers on the ViewModel or into a pure function next to it — not inside Composables (**N5**).
+Formatting, sorting and derived values go into private helpers on the ViewModel or into a pure function next to it — never inside a Composable.
 
-Automatic changes (e.g. unchecking on `Finished`) — **derived from status, not mutated in prefs**: `isChecked = id in activeVisible && status is Active`.
+Automatic changes (e.g. unchecking on `Finished`) — **derived from status**, not mutated in prefs: `isChecked = id in activeVisible && status is Active`.
 
 ## ViewModel
 
 ```kotlin
 @HiltViewModel
 class XViewModel @Inject constructor(
-    observeSources: ObserveSourcesUseCase,
-    observeBatches: ObservePointBatchesUseCase,  // for chart; NOT in State (N1)
-    private val getHistory: GetSourceHistoryUseCase,
+    private val repository: SignalRepository,
     clock: MonotonicClock,
-    @Dispatcher(MonitorDispatchers.Default) dispatcher: CoroutineDispatcher,
-    logger: Logger,
-) : BaseEffectViewModel<XState, XEffect>(logger) {
+    @Dispatcher(ChartMonitorDispatchers.Default) dispatcher: CoroutineDispatcher,
+) : BaseEffectViewModel<XState, XEffect>() {
 
     override fun getStartUIState() = XState()
 
-    val chartBatches: SharedFlow<PointBatch> = observeBatches()  // bypasses State (N1)
-
-    override fun initScreen() {
-        launchWithCatch {
-            combine(observeSources(), secondTicker(clock)) { s, now ->
+    init {
+        launchWithoutCatch {
+            combine(repository.sources, secondTicker(clock)) { s, now ->
                 computeState(s, now, value)
             }
-                .flowOn(dispatcher)                             // sorting/formatting off main (N5)
+                .flowOn(dispatcher)                             // sorting/formatting off main
                 .collect { onUIState(it) }
         }
     }
-
-    fun history(id: SourceId): PointSeries = getHistory(id)
 
     override fun onUIEvent(uiEvent: BaseUIEvent) {
         super.onUIEvent(uiEvent)
@@ -84,7 +73,7 @@ class XViewModel @Inject constructor(
 }
 ```
 
-**One shared 1 Hz tick per screen** (**N6**), aligned to the second boundary:
+**One shared 1 Hz tick per screen**, aligned to the second boundary:
 ```kotlin
 fun secondTicker(clock: MonotonicClock, periodMs: Long = 1_000): Flow<Long> = flow {
     while (true) {
@@ -100,7 +89,7 @@ fun secondTicker(clock: MonotonicClock, periodMs: Long = 1_000): Flow<Long> = fl
 ```kotlin
 @Composable
 fun XRoute(viewModel: XViewModel = hiltViewModel()) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()      // M8
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     XScreen(state, viewModel.chartBatches, viewModel::history, viewModel::onUIEvent)
 }
 
@@ -108,30 +97,28 @@ fun XRoute(viewModel: XViewModel = hiltViewModel()) {
 internal fun XScreen(
     state: XState,
     batches: SharedFlow<PointBatch>,
-    history: (SourceId) -> PointSeries,
+    history: (String) -> Points,
     onUIEvent: (BaseUIEvent) -> Unit,
 ) {
-    // 1) ImmutableList/Set — stable for Compose (M7)
-    // 2) LazyColumn with key = { it.id.value } (M7)
+    // 1) ImmutableList/Set — stable for Compose
+    // 2) LazyColumn with stable key = { it.id }
     // 3) Modifier.animateItem() for smooth re-sort movement
-    // 4) Tabular digits (TabularNumbers from core:designsystem) for timer and value — width stays stable (PERF-02)
-    // 5) alpha via Modifier.graphicsLayer { alpha = ... } (draw phase, no relayout)
+    // 4) alpha via Modifier.graphicsLayer { alpha = ... } (draw phase, no relayout)
 }
 ```
 
 ## Tests
 
-- **Pure helpers**: Kotest `BehaviorSpec` with Given/When/Then, test names `test("FR-LIST-xx ...")`.
+- **Pure helpers**: Kotest `BehaviorSpec` with Given/When/Then.
 - **ViewModel**: Kotest + Turbine + `withTestMain(testCoroutineScheduler) { ... }` from `core:testing`.
 - **Composable** (if complex): instrumented JUnit4, `createComposeRule()`, `testTag` + `onNodeWithText`.
 
 ## Checklist
 
-- [ ] `State` is `@Immutable`, fields are `ImmutableList/Set` (**M7**).
-- [ ] No chart points in `State` (**N1**).
-- [ ] No formatting, sorting, `Random`, `Clock` inside a Composable (**N5**).
-- [ ] One shared tick per screen, not per item (**N6**).
-- [ ] `collectAsStateWithLifecycle()` in UI (**M8**).
-- [ ] `stateIn(viewModelScope, WhileSubscribed(5_000), initial)` — state survives config change without losing upstream.
-- [ ] `flowOn(Dispatchers.Default)` before `stateIn` — reducer is off the main thread.
-- [ ] Compose compiler reports (`-PcomposeReports`): `XState` is stable, `XRow` is skippable.
+- [ ] `State` is `@Immutable`, collections are `ImmutableList/Set`.
+- [ ] No chart points in `State` (streamed via a separate `SharedFlow`).
+- [ ] No formatting, sorting, `Random`, `Clock` inside a Composable.
+- [ ] One shared tick per screen, not per item.
+- [ ] `collectAsStateWithLifecycle()` in UI.
+- [ ] `flowOn(Dispatchers.Default)` on the pipeline — reducer is off the main thread.
+- [ ] Compose compiler reports (`-PcomposeReports`): `XState` is stable, item composables are skippable.

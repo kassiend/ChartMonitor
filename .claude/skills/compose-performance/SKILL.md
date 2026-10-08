@@ -5,33 +5,29 @@ description: Use when reviewing UI code for Compose recomposition cost — scree
 
 # Compose performance
 
-**Source of truth:** `docs/plan.md` §2 (PERF-01, PERF-02, PERF-04), §3 (M7, N5, N6), §4 ("Monitor screen MVI").
-
 **Trigger:** reviewing any Composable; suspected jank or extra recompositions; changes to UI models.
-
-**Rules:** M7, N5, N6.
 
 ## Stability checklist
 
 - `State` and UI models (`XItemUi`) — `@Immutable data class` or `@Stable`.
 - Collections in State — **from `kotlinx-collections-immutable`** (`ImmutableList`, `ImmutableSet`, `PersistentList/Set`). `List<T>` and `Set<T>` are unstable to the compiler.
-- Domain `data class`es used in UI — marked in `compose_stability.conf` (file in the repo root, stage 04).
+- Domain `data class`es used in UI — marked in `compose_stability.conf` at the repo root.
 - Lambdas in Composable signatures are stable when `onClick: () -> Unit`; if they capture VM fields, wrap in `rememberUpdatedState` or forward via `remember { { ... } }`.
 
 ## LazyColumn / LazyRow
 
-- Stable `key = { it.id.value }` — otherwise everything re-renders on every re-sort.
+- Stable `key = { it.id }` — otherwise everything re-renders on every re-sort.
 - `contentType = { "generator" }` — enables viewHolder reuse between items of the same type.
-- `Modifier.animateItem()` for smooth movement on re-sort (`animateItemPlacement` is deprecated).
+- `Modifier.animateItem()` for smooth movement on re-sort.
 - Row height **fixed** when possible — otherwise every item runs measure/layout on each tick.
-- Changing value text at a fixed width (`Modifier.width(...)` + `textAlign = End`) with tabular digits (`TabularNumbers` from `core:designsystem`). Otherwise width jumps around (PERF-02).
+- Changing value text at a fixed width (`Modifier.width(...)` + `textAlign = End`) with tabular digits. Otherwise width jumps around.
 
 ## Where recomposition goes
 
 - `alpha` for "dimming" — via `Modifier.graphicsLayer { alpha = ... }`, **not** `Modifier.alpha(x)`. The former changes in the draw phase, no layout re-trigger.
 - Line color — `Color(item.colorArgb)` is fine when `item` is stable.
 - Reading `State` from collections — via `collectAsStateWithLifecycle()` at the `Route` level, not deep inside a Composable.
-- One tick per screen (**N6**) — `GeneratorRow` receives `timerText: String`, not a clock.
+- One tick per screen — item composables receive `timerText: String`, not a clock.
 
 ## Compiler reports
 
@@ -44,11 +40,11 @@ Reports live in `build/compose_metrics/`. Look at:
 - `*-composables.txt` — which functions are `skippable`, which params are unstable.
 
 **Targets**:
-- `MonitorState`, `GeneratorItemUi` → `stable`.
-- `GeneratorRow` → `restartable skippable`.
-- `MonitorScreen` → `restartable` (not required to be skippable — it is the root).
+- `State` holders → `stable`.
+- Item composables → `restartable skippable`.
+- Screen root → `restartable` (not required to be skippable — it is the root).
 
-An unstable param on `GeneratorRow` → look at its type. Most often it is `List<T>` instead of `ImmutableList<T>`.
+An unstable param on a row composable → look at its type. Most often it is `List<T>` instead of `ImmutableList<T>`.
 
 ## Gestures and animations
 
@@ -68,9 +64,8 @@ An unstable param on `GeneratorRow` → look at its type. Most often it is `List
 ```
 ./gradlew :app:assembleRelease -PcomposeReports
 # → build/compose_metrics/
-./gradlew :benchmark:connectedBenchmarkAndroidTest    # FrameTimingMetric
 ```
 
 ## Report
 
-Review output: table `file:line | what gets recomposed extra | how to fix`. For serious issues — record as `N1/N5/N6/M7` + ADR.
+Review output: table `file:line | what gets recomposed extra | how to fix`.

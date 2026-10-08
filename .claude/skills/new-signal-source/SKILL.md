@@ -1,22 +1,20 @@
 ---
 name: new-signal-source
-description: Use when adding a new source of chart points (generator, backend REST, WebSocket, file replay) to this project. Creates a SignalSource + SignalSourceFactory, wires it via Hilt @IntoSet multibinding, writes a Kotest spec on virtual time. Does NOT touch feature:monitor or core:chart.
+description: Use when adding a new source of chart points (generator, backend REST, WebSocket, file replay) to this project. Creates a SignalSource + SignalSourceFactory, wires it via Hilt @IntoSet multibinding, writes a Kotest spec on virtual time. Does NOT touch feature:chartmonitor UI or core:chart.
 ---
 
 # New signal source
 
-**Source of truth:** `docs/plan.md` §2 (ARCH-01, ARCH-02), §3 (M2, M4, M5, N4), §4 ("Domain contracts").
-
 **Trigger:** "wire up a source", "new source", "data from backend", "replay from a file".
 
-**Rules:** M2, M4, M5, ARCH-01. **The screen (`feature:monitor`) and the chart (`core:chart`) are NOT touched.**
+The screen (`feature:chartmonitor` UI) and the chart (`core:chart`) do NOT change — only the data layer.
 
 ## Steps
 
-1. **Implementation in `core:data/.../source/<Name>SignalSource.kt`**:
+1. **Implementation in `feature/chartmonitor/data/source/<Name>SignalSource.kt`**:
    ```kotlin
    internal class XSignalSource(
-       override val meta: SourceMeta,
+       override val info: SourceInfo,
        private val clock: MonotonicClock,
        private val random: Random,                     // if needed
        private val dispatcher: CoroutineDispatcher,    // via @Dispatcher
@@ -28,21 +26,21 @@ description: Use when adding a new source of chart points (generator, backend RE
    ```
    - `points()` is a **cold Flow**, collected by the repository exactly once.
    - The flow **completes on its own** once the source transitions to `Finished`.
-   - `Clock`, `Random`, dispatcher — only via constructor (**M5**).
-   - **No** `Dispatchers.*`, `System.currentTimeMillis()`, `Thread.sleep` inside the source (**N4**).
+   - `Clock`, `Random`, dispatcher come through the constructor — never read `Dispatchers.*` or `System.currentTimeMillis()` inside.
+   - No `GlobalScope`, `runBlocking`, `Thread.sleep` inside the source.
 
 2. **Factory** `<Name>SourceFactory.kt`:
    ```kotlin
    internal class XSourceFactory @Inject constructor(
        private val config: XConfig,
        private val clock: MonotonicClock,
-       @Dispatcher(MonitorDispatchers.IO) private val dispatcher: CoroutineDispatcher,
+       @Dispatcher(ChartMonitorDispatchers.IO) private val dispatcher: CoroutineDispatcher,
    ) : SignalSourceFactory {
        override fun create(): List<SignalSource> = List(config.count) { ... }
    }
    ```
 
-3. **Hilt multibinding** in `core:data/.../di/SourceFactoriesModule.kt`:
+3. **Hilt multibinding** in the data module's DI:
    ```kotlin
    @Module @InstallIn(SingletonComponent::class)
    internal interface SourceFactoriesModule {
@@ -57,19 +55,18 @@ description: Use when adding a new source of chart points (generator, backend RE
    object XConfigModule { @Provides fun config() = XConfig(...) }
    ```
 
-5. **Kotest spec** `core:data/src/test/.../<Name>SignalSourceSpec.kt`:
+5. **Kotest spec** `src/test/.../<Name>SignalSourceSpec.kt`:
    ```kotlin
    class XSignalSourceSpec : FunSpec({
        coroutineTestScope = true
-       test("ID-xx <what we check>") {
+       test("<what we check>") {
            val clock = TestMonotonicClock(testCoroutineScheduler)
-           val source = XSignalSource(meta, clock, Random(42), StandardTestDispatcher(testCoroutineScheduler))
+           val source = XSignalSource(info, clock, Random(42), StandardTestDispatcher(testCoroutineScheduler))
            val points = source.points().toList()
            points shouldHaveSize ...
        }
    })
    ```
-   Test name = requirement ID.
 
 6. **Integration test** (optional): through `DefaultSignalRepository`, verify that points from the new source appear in `batches`.
 
@@ -77,8 +74,8 @@ description: Use when adding a new source of chart points (generator, backend RE
 
 ## Checklist
 
-- [ ] No `Dispatchers.*`, `System.currentTimeMillis()`, `GlobalScope`, `runBlocking` inside the source (**N4, M4, M5**).
+- [ ] No `Dispatchers.*`, `System.currentTimeMillis()`, `GlobalScope`, `runBlocking` inside the source.
 - [ ] `points()` completes when `_status.value = Finished`.
-- [ ] Factory registered via `@Binds @IntoSet` — `feature:monitor` and `core:chart` do not change (**ARCH-01**).
-- [ ] Test runs on virtual time, name contains the requirement ID.
-- [ ] Commit: `feat(data): add <name> signal source` + `Refs: ARCH-01, FR-…`.
+- [ ] Factory registered via `@Binds @IntoSet` — screen UI and `core:chart` are not touched.
+- [ ] Test runs on virtual time.
+- [ ] Commit: `feat(data): add <name> signal source`.
